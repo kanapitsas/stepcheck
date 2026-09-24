@@ -7,12 +7,13 @@
 """
 
 from .core import MISTAKES, Diagnosis, ParseError, StepVerdict, check_answer, check_claim, check_step, solve_steps
+from .display import to_latex
 from .hints import hint, next_move
 from .i18n import LANGS, localize, tr
 from .practice import SKILLS, Item, generate
 
 __all__ = [
     "MISTAKES", "Diagnosis", "ParseError", "StepVerdict", "check_answer", "check_claim", "check_step", "solve_steps",
-    "hint", "next_move", "LANGS", "localize", "tr", "SKILLS", "Item", "generate",
+    "hint", "next_move", "to_latex", "LANGS", "localize", "tr", "SKILLS", "Item", "generate",
 ]
-__version__ = "0.2.0"
+__version__ = "0.3.0"

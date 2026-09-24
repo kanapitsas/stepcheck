@@ -51,6 +51,7 @@ True
   not "wrong".
 - **Domains**: denominators must not vanish and square roots need a non-negative radicand,
   on the line as written.
+- **`to_latex(line)`** — LaTeX of the line exactly as written (no simplification), for display.
 - **English and French** learner-facing text (`tr(text, "fr")`, `localize(result, "fr")`).
 
 Input is refused rather than guessed when it is not homework-sized math: words other than
@@ -69,7 +70,7 @@ Exit code 0 for a valid line, 1 for a wrong one, 2 for unreadable input.
 
 ## Evaluation
 
-`uv run pytest` — 174 unit tests, including every adversarial case found in four review
+`uv run pytest` — 183 unit tests, including every adversarial case found in four review
 rounds and in simulated tutoring sessions (wrong unknown, `e`/`i` as unknowns, vanishing
 denominators, square-root domains, numeric coincidences, `x = sqrt(-2)` after `x^2 = -2`,
 false side calculations, exponent towers).
