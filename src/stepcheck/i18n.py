@@ -19,6 +19,9 @@ _FR = {
     "subtracting it on one side means subtracting it on the other.":
         "Quand un terme passe de l'autre côté du signe égal, on fait la même opération des deux "
         "côtés : le soustraire d'un côté, c'est le soustraire aussi de l'autre.",
+    "One side was multiplied but the other side was not.": "Un membre a été multiplié, mais pas l'autre.",
+    "To clear a denominator, multiply BOTH sides by it.":
+        "Pour enlever un dénominateur, multiplie les DEUX membres par ce nombre.",
     "Only part of one side was divided.": "Seule une partie d'un membre a été divisée.",
     "Dividing a side means dividing every term on that side, and the other side too.":
         "Diviser un membre, c'est diviser chacun de ses termes, et l'autre membre aussi.",
@@ -40,6 +43,28 @@ _FR = {
         "(a + b)² a été écrit a² + b² : il manque le terme du milieu.",
     "(a + b)^2 = a^2 + 2ab + b^2. Try multiplying (a + b)(a + b) term by term.":
         "(a + b)² = a² + 2ab + b². Essaie de développer (a + b)(a + b) terme à terme.",
+    "The square root of a negative number is not a real number.":
+        "La racine carrée d'un nombre négatif n'est pas un nombre réel.",
+    "A square is never negative, so x^2 = (a negative number) has no real solution.":
+        "Un carré n'est jamais négatif : x² = (un nombre négatif) n'a pas de solution réelle.",
+    "The square of a negative number was given a negative sign.":
+        "Le carré d'un nombre négatif a reçu un signe moins.",
+    "A negative times a negative is positive: (-a)^2 = (-a)(-a).":
+        "Un négatif fois un négatif donne un positif : (-a)² = (-a)(-a).",
+    "Without parentheses, the minus sign is not squared.":
+        "Sans parenthèses, le signe moins n'est pas élevé au carré.",
+    "-a^2 means -(a^2); only (-a)^2 squares the minus sign.":
+        "-a² veut dire -(a²) ; seul (-a)² élève le moins au carré.",
+    "Division by zero is not defined.": "La division par zéro n'est pas définie.",
+    "No number can be divided by zero, not even zero itself.":
+        "Aucun nombre ne peut être divisé par zéro, pas même zéro lui-même.",
+    "That decimal is a rounded value, not exactly equal.":
+        "Ce nombre décimal est une valeur arrondie, pas une égalité exacte.",
+    "Keep the exact value (a fraction or a square root), or write ≈ for a rounded value.":
+        "Garde la valeur exacte (fraction ou racine), ou écris ≈ pour une valeur arrondie.",
+    "Correct as a rounded value.": "Juste, en valeur arrondie.",
+    "This equality between numbers is false.": "Cette égalité entre nombres est fausse.",
+    "Re-do this calculation step by step.": "Refais ce calcul étape par étape.",
     "Everything is right except one sign.": "Tout est juste sauf un signe.",
     "Re-check the signs one term at a time.": "Revérifie les signes, un terme à la fois.",
     "The method is right, but a number is off.": "La méthode est juste, mais un nombre est faux.",
@@ -61,6 +86,12 @@ _FR = {
         "Commence par enlever les parenthèses : multiplie le nombre devant par chaque terme à l'intérieur.",
     "Remove the parentheses first: the minus in front changes the sign of every term inside.":
         "Commence par enlever les parenthèses : le moins devant change le signe de chaque terme à l'intérieur.",
+    "Write the square as a product: (a + b)^2 = (a + b)(a + b), then multiply each term by each term.":
+        "Écris le carré comme un produit : (a + b)² = (a + b)(a + b), puis multiplie chaque terme par chaque terme.",
+    "Distribute: multiply the number in front by each term inside the parentheses.":
+        "Développe : multiplie le nombre devant par chaque terme dans les parenthèses.",
+    "Multiply each term of the first parentheses by each term of the second.":
+        "Multiplie chaque terme de la première parenthèse par chaque terme de la seconde.",
     "Hints don't cover equations with the unknown in a denominator yet. "
     "Remember the unknown can't make a denominator zero.":
         "Les indices ne couvrent pas encore les équations avec l'inconnue au dénominateur. "
@@ -115,6 +146,11 @@ _PATTERNS = [
     (r"(?P<n>\w) is already alone\.", "{n} est déjà seul."),
     (r"(?P<n>\w) is divided by (?P<k>.+?)\.", "{n} est divisé par {k}."),
     (r"(?P<n>\w) is multiplied by (?P<c>.+?)\.", "{n} est multiplié par {c}."),
+    (r"Rewrite every fraction over the common denominator (?P<d>\d+)\.",
+     "Mets toutes les fractions au dénominateur commun {d}."),
+    (r"Write the square as a product\.", "Écris le carré comme un produit."),
+    (r"Distribute\.", "Développe."),
+    (r"Rewrite every fraction over the common denominator (?P<d>\d+)\.", "Mets toutes les fractions au dénominateur commun {d}."),
     (r"The unknown in this problem is (?P<n>\w)\.", "L'inconnue de cet exercice est {n}."),
     (r"Right, as long as (?P<c>.+)\.", "Juste, à condition que {c}."),
 ]

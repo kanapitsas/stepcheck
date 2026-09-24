@@ -34,10 +34,23 @@ class ParseError(ValueError):
     """Raised when a student's input cannot be read as math."""
 
 
-def _clean(text: str) -> str:
+class UndefinedError(ParseError):
+    """The input is readable but undefined, e.g. a division by zero."""
+
+
+def _notation(text: str) -> str:
+    """How students actually type: unicode signs, √ and ², French decimal comma."""
     t = text.strip()
-    t = t.replace("−", "-").replace("×", "*").replace("÷", "/").replace("·", "*")
-    t = re.sub(r"(?<=\d),(?=\d{3}\b)", "", t)  # 1,000 -> 1000
+    t = t.replace("−", "-").replace("–", "-").replace("×", "*").replace("÷", "/").replace("·", "*")
+    t = t.replace("²", "^2").replace("³", "^3")
+    t = re.sub(r"√\s*(\d+|[a-z])", r"sqrt(\1)", t)
+    t = t.replace("√", "sqrt")
+    t = re.sub(r"(?<=\d),(?=\d)", ".", t)  # 1,5 -> 1.5 (a list is written "3, -3" or "3 ; -3")
+    return t
+
+
+def _clean(text: str) -> str:
+    t = _notation(text)
     if re.search(r"[^0-9a-zA-Z+\-*/^().=\s]", t):
         raise ParseError(f"unexpected character in {text!r}")
     # homework-sized input only: bounded length, numbers and exponents (no CAS blow-ups)
@@ -73,7 +86,7 @@ def parse(text: str) -> sp.Expr:
     if not isinstance(expr, sp.Expr):
         raise ParseError(f"could not read {text!r} as a number or expression")
     if expr.has(sp.zoo, sp.nan, sp.oo, -sp.oo):
-        raise ParseError(f"{text!r} is undefined (division by zero)")
+        raise UndefinedError(f"{text!r} is undefined (division by zero)")
     return sp.nsimplify(expr, rational=True) if expr.has(sp.Float) else expr
 
 
@@ -115,7 +128,11 @@ def exclusions(text: str) -> list:
         return []
     out = []
     for side in _clean(text).split("="):
-        out += [d for d in _denominators(_raw(side, text)) if d.free_symbols]
+        raw = _raw(side, text)
+        out += [d for d in _denominators(raw) if d.free_symbols]
+        # sqrt(u) is defined only where u >= 0 (in the real numbers)
+        out += [("radicand", p.base) for p in raw.atoms(sp.Pow)
+                if p.exp.is_Rational and p.exp.q % 2 == 0 and p.base.free_symbols]
     return out
 
 
@@ -147,16 +164,21 @@ def same_value(a: sp.Expr, b: sp.Expr) -> bool:
     return False  # not proven equal: never accept
 
 
-def solution_set(eq: sp.Eq, var: sp.Symbol | None = None, excluded: list | None = None):
+def solution_set(eq: sp.Eq, var: sp.Symbol | None = None, excluded: list | None = None,
+                 domain=sp.S.Reals):
     var = var or (variables(eq)[0] if variables(eq) else None)
     if var is None or var not in eq.free_symbols:
         # "0x = 0" or "3 = 3": true for every value, or for none
-        sols = sp.S.Reals if sp.simplify(eq.lhs - eq.rhs) == 0 else sp.S.EmptySet
+        sols = domain if sp.simplify(eq.lhs - eq.rhs) == 0 else sp.S.EmptySet
     else:
-        sols = sp.solveset(sp.Eq(eq.lhs, eq.rhs), var, domain=sp.S.Reals)
+        sols = sp.solveset(sp.Eq(eq.lhs, eq.rhs), var, domain=domain)
     if var is not None:
         for d in excluded or []:  # the written form is undefined where a denominator is 0
-            sols = sp.Complement(sols, sp.solveset(sp.Eq(d, 0), var, domain=sp.S.Reals))
+            if isinstance(d, tuple):  # ("radicand", u): real-domain condition u >= 0
+                if domain == sp.S.Reals and var in d[1].free_symbols:
+                    sols = sp.Intersection(sols, sp.solveset(d[1] >= 0, var, domain=sp.S.Reals))
+                continue
+            sols = sp.Complement(sols, sp.solveset(sp.Eq(d, 0), var, domain=domain))
     return sols
 
 
@@ -164,7 +186,10 @@ def equivalent_equations(e1: sp.Eq, e2: sp.Eq, excl1: list | None = None, excl2:
     vs = sorted(set(variables(e1)) | set(variables(e2)), key=lambda s: s.name)
     if len(vs) <= 1:
         v = vs[0] if vs else None
-        return solution_set(e1, v, excl1) == solution_set(e2, v, excl2)
+        # Compared over the complex numbers: two equations with no REAL solution are not
+        # interchangeable (x^2 = -2 and x = sqrt(-2) are both empty over the reals).
+        return (solution_set(e1, v, excl1, sp.S.Complexes) == solution_set(e2, v, excl2, sp.S.Complexes)
+                and solution_set(e1, v, excl1) == solution_set(e2, v, excl2))
     # several unknowns: same solution set as polynomial relation (up to a nonzero factor)
     p1 = sp.together(e1.lhs - e1.rhs)
     p2 = sp.together(e2.lhs - e2.rhs)
@@ -208,6 +233,11 @@ MISTAKES = {
         "One side was divided but the other side was not.",
         "Whatever you do to one side of an equation, do exactly the same to the other side.",
     ),
+    "multiplied_one_side": Diagnosis(
+        "multiplied_one_side",
+        "One side was multiplied but the other side was not.",
+        "To clear a denominator, multiply BOTH sides by it.",
+    ),
     "partial_distribution": Diagnosis(
         "partial_distribution",
         "The number in front of the parentheses was not multiplied by every term inside.",
@@ -227,6 +257,36 @@ MISTAKES = {
         "square_of_sum",
         "(a + b)^2 was written as a^2 + b^2; the middle term is missing.",
         "(a + b)^2 = a^2 + 2ab + b^2. Try multiplying (a + b)(a + b) term by term.",
+    ),
+    "sqrt_of_negative": Diagnosis(
+        "sqrt_of_negative",
+        "The square root of a negative number is not a real number.",
+        "A square is never negative, so x^2 = (a negative number) has no real solution.",
+    ),
+    "negative_square": Diagnosis(
+        "negative_square",
+        "The square of a negative number was given a negative sign.",
+        "A negative times a negative is positive: (-a)^2 = (-a)(-a).",
+    ),
+    "minus_not_squared": Diagnosis(
+        "minus_not_squared",
+        "Without parentheses, the minus sign is not squared.",
+        "-a^2 means -(a^2); only (-a)^2 squares the minus sign.",
+    ),
+    "division_by_zero": Diagnosis(
+        "division_by_zero",
+        "Division by zero is not defined.",
+        "No number can be divided by zero, not even zero itself.",
+    ),
+    "rounded_not_equal": Diagnosis(
+        "rounded_not_equal",
+        "That decimal is a rounded value, not exactly equal.",
+        "Keep the exact value (a fraction or a square root), or write ≈ for a rounded value.",
+    ),
+    "false_statement": Diagnosis(
+        "false_statement",
+        "This equality between numbers is false.",
+        "Re-do this calculation step by step.",
     ),
     "sign_slip": Diagnosis(
         "sign_slip",
@@ -249,6 +309,20 @@ def _wrong_equation_moves(eq: sp.Eq) -> list[tuple[str, sp.Eq]]:
     """Plausible *wrong* next lines a learner could write from `eq` (unevaluated)."""
     out: list[tuple[str, sp.Eq]] = []
     sides = (eq.lhs, eq.rhs)
+    # several terms moved at once, each keeping its sign: 5x - 3 = 2x + 9 -> 5x + 2x = 9 - 3
+    lt, rt = _terms(eq.lhs), _terms(eq.rhs)
+    if len(lt) + len(rt) <= 6:
+        import itertools
+        for a in range(len(lt) + 1):
+            for b in range(len(rt) + 1):
+                if a + b < 2:
+                    continue
+                for ml in itertools.combinations(lt, a):
+                    for mr in itertools.combinations(rt, b):
+                        left = [t for t in lt if t not in ml] + list(mr)
+                        right = [t for t in rt if t not in mr] + list(ml)
+                        if left and right:
+                            out.append(("moved_term_kept_sign", sp.Eq(sp.Add(*left), sp.Add(*right))))
     for k in (0, 1):
         side, other = sides[k], sides[1 - k]
 
@@ -269,6 +343,10 @@ def _wrong_equation_moves(eq: sp.Eq) -> list[tuple[str, sp.Eq]]:
             c, var_part = sp.nsimplify(side).as_coeff_Mul()
             if var_part.free_symbols and c not in (0, 1, -1):
                 out.append(("divided_one_side", put(var_part, other)))
+        # multiplied only one side to clear a denominator: 2x/3 = 4 -> 2x = 4
+        den = sp.fraction(sp.together(sp.nsimplify(side)))[1]
+        if den.is_Integer and den != 1:
+            out.append(("multiplied_one_side", put(sp.expand(side * den), other)))
         for code, f in (("partial_distribution", _partial_distributions),
                         ("negative_distribution", _negative_distributions)):
             for w in f(side):
@@ -369,19 +447,56 @@ def _is_isolated(eq: sp.Eq) -> bool:
     )
 
 
+def _check_solution_list(previous: str, step: str) -> StepVerdict:
+    """'x = 2 ou x = 3', 'x = ±3', '3 ; -3' after an equation: compare with its real solutions."""
+    prev = parse_equation(previous)
+    vs = variables(prev)
+    vals = [parse(v) for v in _solution_values(step)]
+    if any(v.has(sp.I) for v in vals):
+        return StepVerdict(False, diagnosis=MISTAKES["sqrt_of_negative"])
+    if len(vs) != 1 or any(v.free_symbols for v in vals):
+        return StepVerdict(False, note="The answer should be a number.")
+    truth = solution_set(prev, vs[0], exclusions(previous))
+    given = sp.FiniteSet(*vals)
+    if isinstance(truth, sp.FiniteSet) and given == truth:
+        return StepVerdict(True, progress=True, solved=True)
+    if isinstance(truth, sp.FiniteSet) and given.is_subset(truth):
+        return StepVerdict(False, note="Correct, but there is another solution.", extra={"partial": True})
+    return StepVerdict(False, diagnosis=MISTAKES["arithmetic_slip"] if isinstance(truth, sp.FiniteSet)
+                       and len(given) == len(truth) else None)
+
+
 def check_step(previous: str, step: str) -> StepVerdict:
     """Is `step` a mathematically valid next line after `previous`? If not, which classic
     mistake explains it? Works for equations (solution-set equivalence) and expressions
     (value equivalence)."""
+    if is_equation(previous) and _is_solution_list(step):
+        return _check_solution_list(previous, step)
     if is_equation(previous) != is_equation(step):
         return StepVerdict(False, note="The previous line and this line are not the same kind "
                                        "(one is an equation, the other is not).")
+    if is_equation(previous) and step.count("=") + step.count("≈") > 1 and not _is_solution_list(step):
+        step, bad_link = _unchain(step)
+        if bad_link is not None:
+            return bad_link
     if is_equation(previous):
         prev, new = parse_equation(previous), parse_equation(step)
+        if new.lhs.has(sp.I) or new.rhs.has(sp.I):
+            return StepVerdict(False, diagnosis=MISTAKES["sqrt_of_negative"])
+        if not new.free_symbols and variables(prev):
+            claim = check_claim(step)
+            contradiction = solution_set(prev, None, exclusions(previous), sp.S.Complexes) == sp.S.EmptySet
+            if not claim.ok and not contradiction:  # a false calculation is not a step (0 = 1 after x = x + 1 is)
+                return claim
         if equivalent_equations(prev, new, exclusions(previous), exclusions(step)):
             solved = _is_isolated(new)
             progress = solved or _complexity(new) < _complexity(prev)
             return StepVerdict(True, progress=progress, solved=solved)
+        if _is_isolated(new) and len(variables(prev)) == 1:  # one root of several: say so, kindly
+            truth = solution_set(prev, variables(prev)[0], exclusions(previous))
+            value = new.rhs if isinstance(new.lhs, sp.Symbol) else new.lhs
+            if isinstance(truth, sp.FiniteSet) and len(truth) > 1 and value in truth:
+                return StepVerdict(False, note="Correct, but there is another solution.", extra={"partial": True})
         raw_prev = sp.Eq(_expr_from_text_raw(previous.split("=")[0]), _expr_from_text_raw(previous.split("=")[1]), evaluate=False)
         for code, cand in _wrong_equation_moves(raw_prev):
             try:
@@ -439,6 +554,97 @@ def _slip_expression(prev: sp.Expr, new: sp.Expr) -> Diagnosis | None:
     return None
 
 
+_NONE = r"no (real )?solutions?|no answer|impossible|pas de solutions?( r[ée]elles?)?|aucune solution|ensemble vide|∅"
+_ALL = (r"all (real )?numbers|any (real )?number|infinitely many|every number|tous les (r[ée]els|nombres|[a-z]\b)|"
+        r"tout (r[ée]el|nombre|[a-z]\b)|toutes les valeurs|n'importe quel(le)? (nombre|valeur)|all [a-z]\b|every [a-z]\b|any [a-z]\b")
+_EXCEPT = (r"not equal to|\bexcept\b|\bsauf\b|diff[ée]rents? de|other than|\bnot\b|≠")
+
+
+def _solution_values(text: str) -> list[str]:
+    """'x = 2 or x = -3', 'x = ±3', '2 ; 3', 'x = 2 ou x = 3' -> ['2', '-3'] etc."""
+    t = _notation(text).lower()
+    t = re.sub(r"\bz[ée]ro\b", "0", t)
+    t = re.sub(r"\b[a-z]\s*=", " ", t)
+    parts = [p.strip() for p in re.split(r"\s*(?:,|;|\bor\b|\bou\b|\band\b|\bet\b)\s*", t) if p.strip()]
+    out = []
+    for p in parts:
+        if p.startswith("±") or p.startswith("+-") or p.startswith("+/-"):
+            core = re.sub(r"^(±|\+/-|\+-)", "", p).strip()
+            out += [core, f"-({core})"]
+        else:
+            out.append(p)
+    return out
+
+
+def _is_solution_list(text: str) -> bool:
+    t = _notation(text).lower()
+    return ("±" in t or "+-" in t or "+/-" in t or bool(re.search(r"\bor\b|\bou\b|;|,", t)))
+
+
+def _unchain(step: str) -> tuple[str, StepVerdict | None]:
+    """'x = (5 + sqrt(1))/2 = 6/2 = 3' -> ('x = 3', None) if every link is a true calculation,
+    or the verdict of the first false link."""
+    tokens = [p.strip() for p in re.split(r"(=|≈)", step)]
+    parts, ops = tokens[0::2], tokens[1::2]
+    if len(parts) < 3:
+        return step, None
+    if not re.fullmatch(r"[a-z]", parts[0].lower()) or ops[0] != "=":
+        raise ParseError("write one equality per line")
+    exact = parts[1]
+    for a, op, b in zip(parts[1:], ops[1:], parts[2:]):
+        link = check_claim(f"{a} {op} {b}")
+        if not link.ok:
+            return step, link
+        if op == "=":
+            exact = b
+    return f"{parts[0]} = {exact}", None
+
+
+def _rounding(eq: sp.Eq, text: str) -> tuple[bool, bool]:
+    """(exactly equal, one side is the other rounded to its written decimals)."""
+    diff = sp.simplify(eq.lhs - eq.rhs)
+    if diff == 0:
+        return True, False
+    for side, other in ((text.split("=")[1], eq.lhs), (text.split("=")[0], eq.rhs)):
+        m = re.fullmatch(r"\s*-?\d+[.,](\d{1,4})\s*", side)
+        if m and other.is_number and other.is_real:
+            decimals = len(m.group(1))
+            written = float(side.replace(",", "."))
+            if abs(float(other) - written) <= 0.5 * 10 ** -decimals + 1e-12:
+                return False, True
+    return False, False
+
+
+def check_claim(text: str) -> StepVerdict:
+    """A calculation with numbers only, e.g. '(-2)^2 = -4': true or false, with the classic
+    sign mistakes named. The correct value is not revealed."""
+    approx = "≈" in text or "~" in text
+    text = text.replace("≈", "=").replace("~", "=")
+    try:
+        eq = parse_equation(text)
+    except UndefinedError:
+        return StepVerdict(False, diagnosis=MISTAKES["division_by_zero"])
+    if eq.free_symbols:
+        raise ParseError("check_claim is for calculations with numbers only")
+    exact, rounded = _rounding(eq, text)
+    if rounded:  # 5/6 = 0.83: a rounded value, not an equality
+        if approx:
+            return StepVerdict(True, note="Correct as a rounded value.")
+        return StepVerdict(False, diagnosis=MISTAKES["rounded_not_equal"])
+    if eq.lhs.has(sp.I) or eq.rhs.has(sp.I):
+        return StepVerdict(False, diagnosis=MISTAKES["sqrt_of_negative"])
+    if sp.simplify(eq.lhs - eq.rhs) == 0:
+        return StepVerdict(True)
+    for side_text, other in ((text.split("=")[0], eq.rhs), (text.split("=")[1], eq.lhs)):
+        t = _clean(side_text).replace(" ", "")
+        value = parse(side_text)
+        if re.fullmatch(r"\(-(\d+|sqrt\(\d+\))\)\^\d*[02468]", t) and other == -value:
+            return StepVerdict(False, diagnosis=MISTAKES["negative_square"])
+        if re.fullmatch(r"-\d+\^\d*[02468]", t) and other == -value:
+            return StepVerdict(False, diagnosis=MISTAKES["minus_not_squared"])
+    return StepVerdict(False, diagnosis=MISTAKES["false_statement"])
+
+
 def check_answer(problem: str, answer: str) -> StepVerdict:
     """Final-answer check: accepts any equivalent form (x = 3/2, 1.5, 3/2, x=1.5)."""
     if is_equation(problem):
@@ -447,8 +653,8 @@ def check_answer(problem: str, answer: str) -> StepVerdict:
         truth = solution_set(eq, vs[0], exclusions(problem)) if len(vs) == 1 else None
         low = answer.lower()
         if truth is not None and not isinstance(truth, sp.FiniteSet):
-            says_none = bool(re.search(r"no (real )?solution|no answer|impossible", low))
-            says_all = bool(re.search(r"all (real )?numbers|any (real )?number|infinitely many|every number", low))
+            says_none = bool(re.search(_NONE, low))
+            says_all = bool(re.search(_ALL, low))
             if truth == sp.S.EmptySet:
                 return StepVerdict(says_none, solved=says_none,
                                    note="" if says_none else "Check again: can this equation ever be true?")
@@ -457,25 +663,31 @@ def check_answer(problem: str, answer: str) -> StepVerdict:
                                    note="" if says_all else "Check again: is this true for more than one value?")
             # e.g. x/x = 1: every number except where the written form is undefined
             ok = False
-            if says_all and "except" in low:
-                tail = re.sub(r"\b[a-z]\s*=", " ", low.split("except", 1)[1])
-                given = [parse(a) for a in re.split(r"\s*(?:,|\bor\b|\band\b)\s*", tail) if a.strip()]
+            if says_all and re.search(_EXCEPT, low):
+                tail = re.split(_EXCEPT, low, maxsplit=1)[1]
+                given = [parse(a) for a in _solution_values(tail)]
                 missing = sp.Complement(sp.S.Reals, truth)
                 ok = bool(given) and sp.FiniteSet(*given) == missing
             return StepVerdict(ok, solved=ok, note="" if ok else
                                "Careful: this is true for many values, but not where a denominator is zero.")
-        if re.search(r"no (real )?solution|all (real )?numbers|infinitely many", low):
+        if re.search(_NONE, low) or re.search(_ALL, low):
             return StepVerdict(False, note="This equation does have specific solutions.")
         if len(vs) == 1:
             labels = set(re.findall(r"\b([a-z])\s*=", low))
             if labels - {vs[0].name}:
                 return StepVerdict(False, note=f"The unknown in this problem is {vs[0].name}.")
-        ans = re.sub(r"\b[a-z]\s*=", " ", low)
-        vals = [parse(a) for a in re.split(r"\s*(?:,|\bor\b|\band\b)\s*", ans) if a.strip()]
+        vals = [parse(a) for a in _solution_values(answer)]
+        if re.search(r"\d,\d", answer) and isinstance(truth, sp.FiniteSet) and sp.FiniteSet(*vals) != truth:
+            # "2,3" may be the decimal 2.3 or the list 2 ; 3: accept the list reading if it is exact
+            listed = [parse(a) for a in _solution_values(re.sub(r"(\d),(\d)", r"\1 ; \2", answer))]
+            if sp.FiniteSet(*listed) == truth:
+                vals = listed
         if not vals:
             raise ParseError("no answer given")
         if any(v.free_symbols for v in vals):
             return StepVerdict(False, note="The answer should be a number.")
+        if any(v.has(sp.I) for v in vals):
+            return StepVerdict(False, diagnosis=MISTAKES["sqrt_of_negative"])
         if truth is not None and isinstance(truth, sp.FiniteSet):
             given = sp.FiniteSet(*[sp.nsimplify(v) for v in vals])
             if given == truth:

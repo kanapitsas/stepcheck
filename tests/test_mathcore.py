@@ -169,3 +169,150 @@ def test_never_mind_is_not_no_solution():
         assert check_answer("x = x + 1", "never mind").ok is False
     except ParseError:
         pass
+
+
+# Found by hand in the simulator on 24/09: both were accepted before.
+def test_sqrt_of_negative_is_not_a_valid_step():
+    assert check_step("x^2 + 2 = 0", "x^2 = -2").ok is True
+    v = check_step("x^2 = -2", "x = sqrt(-2)")
+    assert v.ok is False and v.diagnosis.code == "sqrt_of_negative"
+
+
+def test_false_side_calculation_is_never_a_valid_step():
+    v = check_step("x = sqrt(2)", "(-2)^2 = -4")
+    assert v.ok is False and v.diagnosis.code == "negative_square"
+    assert check_step("x^2 = -2", "(-2)^2 = -4").ok is False
+
+
+@pytest.mark.parametrize("claim,ok,code", [
+    ("(-2)^2 = -4", False, "negative_square"),
+    ("(-2)^2 = 4", True, None),
+    ("-2^2 = 4", False, "minus_not_squared"),
+    ("-2^2 = -4", True, None),
+    ("7 + 8 = 16", False, "false_statement"),
+    ("sqrt(-4) = 2", False, "sqrt_of_negative"),
+])
+def test_claims(claim, ok, code):
+    from stepcheck.core import check_claim
+    v = check_claim(claim)
+    assert v.ok is ok and (code is None or v.diagnosis.code == code)
+
+
+def test_equations_without_real_solution_are_still_distinguished():
+    assert check_step("x^2 = -2", "x^2 = -3").ok is False
+    assert check_step("x^2 = -4", "x^2 + 4 = 0").ok is True
+    assert check_step("x = x + 1", "0 = 1").ok is True
+
+
+# Found by the simulated-student red team on 24/09.
+@pytest.mark.parametrize("answer,ok", [
+    ("pas de solution réelle", True), ("aucune solution", True), ("pas de solution", True),
+    ("no real solution", True), ("x = 2", False),
+])
+def test_no_solution_in_french(answer, ok):
+    assert check_answer("x^2 + 2 = 0", answer).ok is ok
+
+
+@pytest.mark.parametrize("answer,ok", [
+    ("x = ±3", True), ("x = 3 ou x = -3", True), ("3 ; -3", True), ("x = 3 et x = -3", True), ("±√9", True),
+    ("x = ±√(-9)", False),
+])
+def test_student_notations_for_two_solutions(answer, ok):
+    assert check_answer("x^2 = 9", answer).ok is ok
+
+
+@pytest.mark.parametrize("step,ok,code", [
+    ("x = 2 ou x = 3", True, None),
+    ("x = 2", False, None),              # partial: one solution missing
+    ("x = ±√(-2)", False, "sqrt_of_negative"),
+])
+def test_solution_lines_in_steps(step, ok, code):
+    prev = "x^2 = -2" if "-2" in step else "x^2 - 5x + 6 = 0"
+    v = check_step(prev, step)
+    assert v.ok is ok and (code is None or v.diagnosis.code == code)
+
+
+def test_french_decimal_comma_and_unicode():
+    assert check_answer("2x + 1 = 4", "x = 1,5").ok is True
+    assert check_step("x² = 9", "x = ±3").ok is True
+    assert check_answer("x/x = 1", "tous les réels sauf 0").ok is True
+
+
+def test_one_root_of_two_is_partial_not_wrong():
+    v = check_step("x^2 - 5x + 6 = 0", "x = 2")
+    assert v.ok is False and v.extra.get("partial") is True
+
+
+# Found by the second red-team run on 24/09.
+def test_two_terms_moved_without_sign_change():
+    v = check_step("5x - 3 = 2x + 9", "5x + 2x = 9 - 3")
+    assert v.ok is False and v.diagnosis.code == "moved_term_kept_sign"
+
+
+@pytest.mark.parametrize("claim,ok,code", [
+    ("5/6 = 0.83", False, "rounded_not_equal"),
+    ("5/6 ≈ 0.83", True, None),
+    ("5/6 = 0,83", False, "rounded_not_equal"),
+    ("5/6 = 0.84", False, "false_statement"),
+    ("0/0 = 1", False, "division_by_zero"),
+    ("1/2 = 0.5", True, None),
+])
+def test_claims_rounding_and_zero(claim, ok, code):
+    from stepcheck.core import check_claim
+    v = check_claim(claim)
+    assert v.ok is ok and (code is None or v.diagnosis.code == code)
+
+
+def test_chained_equalities_and_partial():
+    v = check_step("x^2 - 5x + 6 = 0", "x = (5 + sqrt(1))/2 = 6/2 = 3")
+    assert v.ok is False and v.extra.get("partial") is True
+    bad = check_step("x^2 - 5x + 6 = 0", "x = (5 + sqrt(1))/2 = 5/2")
+    assert bad.ok is False and bad.diagnosis.code == "false_statement"
+
+
+@pytest.mark.parametrize("answer", ["pour tout x différent de zéro", "tous les x sauf 0", "all x except 0",
+                                    "tout réel x ≠ 0"])
+def test_every_x_except_zero(answer):
+    assert check_answer("x/x = 1", answer).ok is True
+
+
+def test_multiplied_one_side():
+    v = check_step("2x/3 = 4", "2x = 4")
+    assert v.ok is False and v.diagnosis.code == "multiplied_one_side"
+    assert check_step("2x/3 = 4", "2x = 12").ok is True
+
+
+# Fourth review round (24/09): radicals, lists, commas, "not equal to", ≈ in chains.
+def test_square_root_domain_is_kept():
+    assert check_answer("sqrt(x - 1) = sqrt(x - 1)", "all real numbers").ok is False
+    assert check_step("sqrt(x - 1) = sqrt(x - 1)", "x = x").ok is False
+    assert check_step("sqrt(x) = 2", "x = 4").ok is True
+
+
+@pytest.mark.parametrize("step", ["x = 3, -3", "3 ; -3", "x = +-3", "x = ±3"])
+def test_solution_lists_in_steps(step):
+    assert check_step("x^2 = 9", step).ok is True
+
+
+@pytest.mark.parametrize("answer,ok", [("2,3", True), ("2, 3", True), ("2,5", False)])
+def test_ambiguous_comma(answer, ok):
+    assert check_answer("x^2 - 5x + 6 = 0", answer).ok is ok
+
+
+def test_decimal_comma_still_a_decimal():
+    assert check_answer("2x = 5", "2,5").ok is True
+
+
+def test_not_equal_to():
+    assert check_answer("x/x = 1", "all x not equal to zero").ok is True
+
+
+def test_approximate_link_in_a_chain():
+    assert check_step("2x = 6", "x = 6/2 ≈ 3").ok is True
+    assert check_step("2x = 7", "x = 7/2 ≈ 3.5").ok is True
+    assert check_step("2x = 7", "x = 7/2 ≈ 4").ok is False
+
+
+def test_negative_square_with_a_root():
+    from stepcheck.core import check_claim
+    assert check_claim("(-sqrt(2))^2 = -2").diagnosis.code == "negative_square"

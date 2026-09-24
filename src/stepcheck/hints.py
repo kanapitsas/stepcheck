@@ -22,7 +22,7 @@ def _products_with_sum(e: sp.Expr, x: sp.Symbol) -> str | None:
 def next_move(line: str) -> tuple[str, str]:
     """Return (what to do, the resulting line) for a linear equation in one unknown.
     The returned line is verified equivalent, on the same domain, and different from `line`."""
-    if exclusions(line):
+    if [d for d in exclusions(line) if not isinstance(d, tuple)]:
         raise ValueError("Hints don't cover equations with the unknown in a denominator yet. "
                          "Remember the unknown can't make a denominator zero.")
     eq = parse_equation(line)
@@ -76,9 +76,47 @@ def next_move(line: str) -> tuple[str, str]:
     return action, new_line
 
 
+def _mul(*factors) -> str:
+    return " × ".join(f"({pretty(f)})" if isinstance(f, sp.Add) or (f.is_number and f < 0) else pretty(f)
+                      for f in factors)
+
+
+def next_move_expression(line: str) -> tuple[str, str]:
+    """Hints for expanding or adding: the next line shows the structure, never the result."""
+    from .core import _expr_from_text_raw, parse, same_value
+
+    raw = _expr_from_text_raw(line)
+    new = None
+    for p in raw.atoms(sp.Pow):
+        if isinstance(p.base, sp.Add) and p.exp == 2 and p == raw:
+            action = ("Write the square as a product: (a + b)^2 = (a + b)(a + b), "
+                      "then multiply each term by each term.")
+            new = f"({pretty(p.base)})({pretty(p.base)})"
+    if new is None and isinstance(raw, sp.Mul):
+        sums = [f for f in sp.Mul.make_args(raw) if isinstance(f, sp.Add)]
+        others = sp.Mul(*[f for f in sp.Mul.make_args(raw) if not isinstance(f, sp.Add)])
+        if len(sums) == 1 and others != 1:
+            action = "Distribute: multiply the number in front by each term inside the parentheses."
+            new = " + ".join(_mul(others, t) for t in sp.Add.make_args(sums[0]))
+        elif len(sums) == 2 and others == 1:
+            action = "Multiply each term of the first parentheses by each term of the second."
+            new = " + ".join(_mul(a, b) for a in sp.Add.make_args(sums[0]) for b in sp.Add.make_args(sums[1]))
+    if new is None:
+        fr = [sp.nsimplify(t.doit()) for t in sp.Add.make_args(raw)]
+        if len(fr) >= 2 and all(v.is_Rational for v in fr) and any(not v.is_Integer for v in fr):
+            den = sp.ilcm(*[v.q for v in fr])
+            action = f"Rewrite every fraction over the common denominator {den}."
+            new = " + ".join(f"{v * den}/{den}" for v in fr)
+    if new is None:
+        raise ValueError("I can't find a safe next step for this line.")
+    if not same_value(parse(line), parse(new)):
+        raise ValueError("I can't find a safe next step for this line.")
+    return action, new
+
+
 def hint(line: str, level: int) -> dict:
     """level 1: which idea; level 2: the exact operation; level 3: the next line (verified)."""
-    action, new_line = next_move(line)
+    action, new_line = next_move(line) if "=" in line else next_move_expression(line)
     if level <= 1:
         return {"level": 1, "hint": action.split(":")[0].rstrip(".") + ".", "more_available": True}
     if level == 2:

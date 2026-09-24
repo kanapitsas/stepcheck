@@ -1,6 +1,6 @@
 [project]
 name = "stepcheck"
-version = "0.1.0"
+version = "0.2.0"
 description = "Verify a student's algebra one line at a time with a computer algebra system, and name the classic mistake behind a wrong line."
 readme = "README.md"
 license = "MIT"

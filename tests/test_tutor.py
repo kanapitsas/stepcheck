@@ -35,3 +35,12 @@ def test_levels_one_and_two_never_contain_the_next_line():
 def test_minus_before_parentheses_gets_its_own_hint():
     action, nxt = next_move("10 - (x + 3) = 4")
     assert "minus" in action and nxt.replace(" ", "") == "7-x=4"
+
+
+@pytest.mark.parametrize("line", ["(x + 3)^2", "2(x + 5)", "(x + 1)(x - 2)", "1/2 + 1/3", "-3(x - 2)"])
+def test_expression_hints_show_structure_not_the_result(line):
+    from stepcheck.core import parse, same_value
+    h3 = hint(line, 3)
+    assert same_value(parse(line), parse(h3["next_line"]))
+    # the level-3 line is not already the simplified answer
+    assert h3["next_line"].replace(" ", "") != str(parse(line).expand()).replace(" ", "").replace("**", "^")

@@ -42,6 +42,15 @@ True
   operation, level 3 the next line. Every hinted line is verified before it is returned;
   lines it cannot hint safely raise `ValueError` instead of guessing.
 - **`generate(skill)`** — practice items for seven skills, each verified before use.
+- **`check_claim("(-2)^2 = -4")`** — side calculations with numbers only: true or false,
+  with the classic sign mistakes named (`(-a)^2`, `-a^2`), rounded values (`5/6 = 0.83` is
+  not an equality, `5/6 ≈ 0.83` is fine) and division by zero.
+- **How students write**: `x = ±3`, `x = 2 ou x = 3`, `3 ; -3`, chained equalities
+  (`x = (5 + √1)/2 = 6/2 = 3`), `√`, `²`, decimal commas, "pas de solution",
+  "tous les x sauf 0". A first root of two is "correct, but there is another solution",
+  not "wrong".
+- **Domains**: denominators must not vanish and square roots need a non-negative radicand,
+  on the line as written.
 - **English and French** learner-facing text (`tr(text, "fr")`, `localize(result, "fr")`).
 
 Input is refused rather than guessed when it is not homework-sized math: words other than
@@ -60,8 +69,10 @@ Exit code 0 for a valid line, 1 for a wrong one, 2 for unreadable input.
 
 ## Evaluation
 
-`uv run pytest` — unit tests including adversarial cases found in review (wrong unknown,
-`e`/`i` as unknowns, vanishing denominators, numeric coincidences, exponent towers).
+`uv run pytest` — 174 unit tests, including every adversarial case found in four review
+rounds and in simulated tutoring sessions (wrong unknown, `e`/`i` as unknowns, vanishing
+denominators, square-root domains, numeric coincidences, `x = sqrt(-2)` after `x^2 = -2`,
+false side calculations, exponent towers).
 
 `uv run python eval/soundness.py 400 11` — correct lines from the hint engine versus wrong
 lines made by random textual perturbations (flip a sign, change a digit, drop a term), with
@@ -72,8 +83,8 @@ code that shares nothing with the diagnosis:
 | correct lines | 1,000 | 0 rejected |
 | wrong lines | 924 | 0 accepted |
 
-A specific misconception is named for 96 % of the wrong lines (mostly, and rightly,
-"arithmetic slip" for random digit changes). The accept/reject verdict rests on symbolic
+Every wrong line gets a diagnosis; 78 % are, rightly, plain arithmetic slips (random digit
+changes) and the rest name a specific misconception. The accept/reject verdict rests on symbolic
 equivalence, so this mainly shows that parsing and edge cases hold; the misconception labels
 are heuristics with a fixed catalogue.
 
